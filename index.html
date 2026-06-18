@@ -1,0 +1,157 @@
+
+<style>
+  .wrap { padding: 1.5rem 0 0.5rem; }
+  .face-canvas { position: relative; width: 280px; height: 300px; background: #fff; overflow: hidden; }
+  .face-part { position: absolute; font-weight: 700; line-height: 1; user-select: none; pointer-events: none; color: #000; }
+  .silhouette-layer { position: absolute; inset: 0; }
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 1.25rem; flex-wrap: wrap; }
+  .btn-main { padding: 9px 22px; font-size: 14px; font-weight: 500; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); cursor: pointer; background: var(--color-background-primary); color: var(--color-text-primary); transition: background 0.15s; }
+  .btn-main:hover:not(:disabled) { background: var(--color-background-secondary); }
+  .btn-main:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-dl { background: #fe0000; color: #fff; border-color: #fe0000; }
+  .btn-dl:hover:not(:disabled) { background: #cc0000; }
+  .status { text-align: center; font-size: 13px; color: var(--color-text-secondary); margin-top: 10px; min-height: 20px; }
+  .preview-wrap { display: flex; justify-content: center; }
+  .polaroid { background: #fff; border: 1.5px solid #ddd; padding: 12px 12px 44px 12px; width: 304px; box-sizing: border-box; position: relative; }
+  .polaroid-title { font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-align: center; color: #111; margin-bottom: 8px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+  .polaroid-date { position: absolute; bottom: 10px; right: 14px; font-size: 10px; color: #888; font-family: var(--font-mono); }
+  .polaroid-num  { position: absolute; bottom: 10px; left: 14px; font-size: 10px; color: #ccc; font-family: var(--font-mono); }
+</style>
+
+<div class="wrap">
+  <div class="preview-wrap">
+    <div class="polaroid" id="polaroid">
+      <div class="polaroid-title">HAPPY FACE MAKER</div>
+      <div class="face-canvas" id="canvas">
+        <canvas id="silhouette" class="silhouette-layer" width="280" height="300"></canvas>
+        <div class="face-part" id="eye-l"></div>
+        <div class="face-part" id="eye-r"></div>
+        <div class="face-part" id="nose"></div>
+        <div class="face-part" id="mouth"></div>
+      </div>
+      <div class="polaroid-num" id="pol-num">#001</div>
+      <div class="polaroid-date" id="pol-date">----/--/-- --:--:--</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-main" id="btn-start" onclick="startSlot()">▶ スタート</button>
+    <button class="btn-main" id="btn-stop" disabled onclick="stopSlot()">■ ストップ</button>
+    <button class="btn-main btn-dl" id="btn-dl" disabled onclick="downloadFace()">↓ PNG保存</button>
+  </div>
+  <div class="status" id="status">スタートを押して顔を作ろう</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const W = 280, H = 300;
+const FILL_COLOR = '#fe0000';
+let faceCount = 0, lastDate = '';
+
+function rand(a,b){return Math.random()*(b-a)+a;}
+function randChar(){return CHARS[Math.floor(Math.random()*CHARS.length)];}
+function randItem(arr){return arr[Math.floor(Math.random()*arr.length)];}
+function nowString(){const d=new Date(),p=n=>String(n).padStart(2,'0');return`${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;}
+
+function drawSilhouette(ctx){
+  const types=['circle','ellipse-v','ellipse-h','triangle','rect','pentagon','hexagon','diamond','trapezoid','star','arrow'];
+  const type=randItem(types);
+  ctx.clearRect(0,0,W,H);ctx.fillStyle=FILL_COLOR;
+  const cx=W/2+rand(-12,12),cy=H/2+rand(-12,12),r=rand(90,125);
+  switch(type){
+    case 'circle':ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();break;
+    case 'ellipse-v':ctx.beginPath();ctx.ellipse(cx,cy,r*rand(0.65,0.82),r*rand(1.05,1.25),rand(-10,10)*Math.PI/180,0,Math.PI*2);ctx.fill();break;
+    case 'ellipse-h':ctx.beginPath();ctx.ellipse(cx,cy,r*rand(1.05,1.25),r*rand(0.65,0.82),rand(-10,10)*Math.PI/180,0,Math.PI*2);ctx.fill();break;
+    case 'triangle':{const sk=rand(-20,20);ctx.beginPath();ctx.moveTo(cx+sk,cy-r);ctx.lineTo(cx-r,cy+r);ctx.lineTo(cx+r,cy+r);ctx.closePath();ctx.fill();break;}
+    case 'rect':{const rw=rand(150,210),rh=rand(160,220),a=rand(-12,12)*Math.PI/180;ctx.save();ctx.translate(cx,cy);ctx.rotate(a);ctx.fillRect(-rw/2,-rh/2,rw,rh);ctx.restore();break;}
+    case 'pentagon':drawPoly(ctx,cx,cy,r,5,rand(-20,20));break;
+    case 'hexagon':drawPoly(ctx,cx,cy,r,6,rand(-30,30));break;
+    case 'diamond':{const dw=rand(120,180),dh=rand(160,220);ctx.beginPath();ctx.moveTo(cx,cy-dh/2);ctx.lineTo(cx+dw/2,cy);ctx.lineTo(cx,cy+dh/2);ctx.lineTo(cx-dw/2,cy);ctx.closePath();ctx.fill();break;}
+    case 'trapezoid':{const tw=rand(70,115),bw=rand(130,185),th=rand(150,200),a=rand(-10,10)*Math.PI/180;ctx.save();ctx.translate(cx,cy);ctx.rotate(a);ctx.beginPath();ctx.moveTo(-tw/2,-th/2);ctx.lineTo(tw/2,-th/2);ctx.lineTo(bw/2,th/2);ctx.lineTo(-bw/2,th/2);ctx.closePath();ctx.fill();ctx.restore();break;}
+    case 'star':drawStar(ctx,cx,cy,r*0.95,r*0.42,5,rand(0,36));break;
+    case 'arrow':{const aw=rand(150,200),ah=rand(160,210),nk=rand(0.35,0.55);ctx.save();ctx.translate(cx,cy);ctx.rotate(rand(-10,10)*Math.PI/180);ctx.beginPath();ctx.moveTo(0,-ah/2);ctx.lineTo(aw/2,0);ctx.lineTo(aw*nk/2,0);ctx.lineTo(aw*nk/2,ah/2);ctx.lineTo(-aw*nk/2,ah/2);ctx.lineTo(-aw*nk/2,0);ctx.lineTo(-aw/2,0);ctx.closePath();ctx.fill();ctx.restore();break;}
+  }
+}
+function drawPoly(ctx,cx,cy,r,n,rotDeg){const rot=rotDeg*Math.PI/180;ctx.beginPath();for(let i=0;i<n;i++){const a=rot+(2*Math.PI*i/n)-Math.PI/2;i===0?ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}ctx.closePath();ctx.fill();}
+function drawStar(ctx,cx,cy,outerR,innerR,points,rotDeg){const rot=rotDeg*Math.PI/180;ctx.beginPath();for(let i=0;i<points*2;i++){const r=i%2===0?outerR:innerR,a=rot+(Math.PI*i/points)-Math.PI/2;i===0?ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}ctx.closePath();ctx.fill();}
+
+let silBounds={x:50,y:50,w:180,h:200};
+function updateBounds(){
+  const ctx=document.getElementById('silhouette').getContext('2d');
+  const data=ctx.getImageData(0,0,W,H).data;
+  let minX=W,maxX=0,minY=H,maxY=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=(y*W+x)*4;if(data[i+3]>50){if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}}
+  if(maxX>minX)silBounds={x:minX,y:minY,w:maxX-minX,h:maxY-minY};
+}
+function getPos(role){
+  const{x,y,w,h}=silBounds,cx=x+w/2;
+  if(role==='eye-l')return{px:cx-w*rand(0.15,0.25),py:y+h*rand(0.25,0.38)};
+  if(role==='eye-r')return{px:cx+w*rand(0.15,0.25),py:y+h*rand(0.25,0.38)};
+  if(role==='nose')return{px:cx+rand(-w*0.05,w*0.05),py:y+h*rand(0.46,0.56)};
+  if(role==='mouth')return{px:cx+rand(-w*0.06,w*0.06),py:y+h*rand(0.66,0.76)};
+}
+function setPart(id,char,ov){
+  const el=document.getElementById(id),pos=getPos(id);
+  const size=ov?.size??rand(20,50),angle=ov?.angle??rand(-50,50);
+  el.textContent=char;el.style.fontSize=size+'px';
+  el.style.left=pos.px+'px';el.style.top=pos.py+'px';
+  el.style.transform=`translate(-50%,-50%) rotate(${angle}deg)`;
+  el.style.fontFamily=Math.random()>0.5?'var(--font-sans)':'var(--font-mono)';
+}
+
+let animTimer=null,cdTimer=null,state='idle';
+function animLoop(){
+  ['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{}));
+  drawSilhouette(document.getElementById('silhouette').getContext('2d'));
+  animTimer=setTimeout(animLoop,100);
+}
+function startSlot(){
+  if(state!=='idle')return;state='spinning';
+  document.getElementById('btn-start').disabled=true;
+  document.getElementById('btn-stop').disabled=false;
+  document.getElementById('btn-dl').disabled=true;
+  document.getElementById('status').textContent='スピン中... ストップを押してください';
+  document.getElementById('pol-date').textContent='----/--/-- --:--:--';
+  animLoop();
+}
+function stopSlot(){
+  if(state!=='spinning')return;state='stopping';
+  document.getElementById('btn-stop').disabled=true;
+  document.getElementById('status').textContent='確定まで 3 秒...';
+  let cd=3;
+  cdTimer=setInterval(()=>{
+    cd--;
+    if(cd>0){document.getElementById('status').textContent=`確定まで ${cd} 秒...`;}
+    else{clearInterval(cdTimer);finalize();}
+  },1000);
+}
+function finalize(){
+  clearTimeout(animTimer);animTimer=null;
+  drawSilhouette(document.getElementById('silhouette').getContext('2d'));
+  setTimeout(()=>{
+    updateBounds();
+    ['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{size:rand(26,48),angle:rand(-35,35)}));
+    faceCount++;lastDate=nowString();
+    document.getElementById('pol-date').textContent=lastDate;
+    document.getElementById('pol-num').textContent='#'+String(faceCount).padStart(3,'0');
+    state='idle';
+    document.getElementById('btn-start').disabled=false;
+    document.getElementById('btn-dl').disabled=false;
+    document.getElementById('status').textContent='顔が確定！PNG保存ボタンでダウンロードできます';
+  },50);
+}
+async function downloadFace(){
+  try{
+    const canvas=await html2canvas(document.getElementById('polaroid'),{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false});
+    const link=document.createElement('a');
+    link.download=`happyfacemaker_${lastDate.replace(/[\/: ]/g,'-')}.png`;
+    link.href=canvas.toDataURL('image/png');link.click();
+    document.getElementById('status').textContent='保存しました！';
+  }catch(e){document.getElementById('status').textContent='保存に失敗しました。もう一度お試しください。';}
+}
+(function init(){
+  drawSilhouette(document.getElementById('silhouette').getContext('2d'));
+  setTimeout(()=>{updateBounds();['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{}));},50);
+})();
+</script>
