@@ -117,16 +117,13 @@ function resizeCanvas(){
   c.width=CW; c.height=CH;
 }
 
-// ---- 有機的なアメーバ形状の生成 ----
-// N個の制御点を中心からの半径をランダムに揺らして配置し、
-// Catmull-Rom的な滑らかさでベジェ曲線として閉じる
 function drawBlob(ctx, cx, cy, baseR){
-  const points = Math.floor(rand(7, 11)); // 制御点の数（多いほど複雑な輪郭）
+  const points = Math.floor(rand(7, 11));
   const angleStep = (Math.PI * 2) / points;
   const pts = [];
   for (let i = 0; i < points; i++) {
     const angle = i * angleStep + rand(-angleStep*0.15, angleStep*0.15);
-    const radius = baseR * rand(0.62, 1.18); // 半径をランダムに揺らして不定形に
+    const radius = baseR * rand(0.62, 1.18);
     pts.push({
       x: cx + Math.cos(angle) * radius,
       y: cy + Math.sin(angle) * radius,
@@ -202,11 +199,31 @@ function setPart(id,char,ov){
 }
 
 let animTimer=null,cdTimer=null,state='idle';
+let spinStartTime=0;
+
+const SPIN_INTERVAL_MIN = 80;
+const SLOWDOWN_DURATION = 3000;
+const SPIN_INTERVAL_MAX = 700;
+
+function easeOutCubic(t){
+  return 1 - Math.pow(1 - t, 3);
+}
+
 function animLoop(){
   ['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{}));
   drawSilhouette(document.getElementById('silhouette').getContext('2d'));
-  animTimer=setTimeout(animLoop,100);
+
+  let interval = SPIN_INTERVAL_MIN;
+  if (state === 'stopping') {
+    const elapsed = Date.now() - spinStartTime;
+    const t = Math.min(elapsed / SLOWDOWN_DURATION, 1);
+    const eased = easeOutCubic(t);
+    interval = SPIN_INTERVAL_MIN + (SPIN_INTERVAL_MAX - SPIN_INTERVAL_MIN) * eased;
+  }
+
+  animTimer=setTimeout(animLoop, interval);
 }
+
 function startSlot(){
   if(state!=='idle')return;
   getAudioCtx();
@@ -222,26 +239,49 @@ function startSlot(){
 }
 function stopSlot(){
   if(state!=='spinning')return; state='stopping';
+  spinStartTime = Date.now();
   document.getElementById('btn-stop').disabled=true;
-  document.getElementById('status').textContent='確定まで 1 秒...';
-  cdTimer=setTimeout(()=>{ finalize(); },1000);
+  document.getElementById('status').textContent='確定まで 3 秒...';
+
+  let remaining = 3;
+  cdTimer = setInterval(() => {
+    remaining--;
+    if (remaining > 0) {
+      document.getElementById('status').textContent = `確定まで ${remaining} 秒...`;
+    } else {
+      clearInterval(cdTimer);
+    }
+  }, 1000);
+
+  setTimeout(()=>{ finalize(); }, SLOWDOWN_DURATION);
 }
+
+// 表示確定と効果音を同期させる。
+// rAFコールバックは「次の描画が走る直前」に発火するため、その中で鳴らすと
+// 音がわずかに画面更新より先行することがある。
+// 2回連続のrAF（= 1フレーム実際にレンダリングを挟む）を使うことで、
+// 確実に「目に見えてから」音が鳴るようにする。
 function finalize(){
   clearTimeout(animTimer); animTimer=null;
+  clearInterval(cdTimer);
+
   drawSilhouette(document.getElementById('silhouette').getContext('2d'));
-  setTimeout(()=>{
-    updateBounds();
-    const scale=CW/280;
-    ['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{size:rand(26,48)*scale,angle:rand(-35,35)}));
-    faceCount++; lastDate=nowString();
-    document.getElementById('pol-date').textContent=lastDate;
-    document.getElementById('pol-num').textContent='#'+String(faceCount).padStart(3,'0');
-    state='idle';
-    document.getElementById('btn-start').disabled=false;
-    document.getElementById('btn-dl').disabled=false;
-    document.getElementById('status').textContent='顔が確定！PNG保存ボタンでダウンロードできます';
-    playConfirmSound();
-  },50);
+  updateBounds();
+  const scale=CW/280;
+  ['eye-l','eye-r','nose','mouth'].forEach(id=>setPart(id,randChar(),{size:rand(26,48)*scale,angle:rand(-35,35)}));
+  faceCount++; lastDate=nowString();
+  document.getElementById('pol-date').textContent=lastDate;
+  document.getElementById('pol-num').textContent='#'+String(faceCount).padStart(3,'0');
+  state='idle';
+  document.getElementById('btn-start').disabled=false;
+  document.getElementById('btn-dl').disabled=false;
+  document.getElementById('status').textContent='顔が確定！PNG保存ボタンでダウンロードできます';
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      playConfirmSound();
+    });
+  });
 }
 
 async function saveFace(){
